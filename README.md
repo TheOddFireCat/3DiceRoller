@@ -32,3 +32,5 @@ there are 2 pages, left takes you a page back, right takes you a page forward
 - Freesound.org; by CC 4.0; originally by [magedu](https://freesound.org/people/magedu/)
   - used "[old_crt_monitor_button_turn_on_01](https://freesound.org/people/magedu/sounds/263900/)" and "[old_pc_button_turn_off](https://freesound.org/people/magedu/sounds/264386/)" and modified a bit
 - Font used in the app is "[Saga](https://somepx.itch.io/pixel-font-saga)" by [somepx](https://twitter.com/somepx)
+
+#### p.s ik the repository name is different from the app name, i goofed up
