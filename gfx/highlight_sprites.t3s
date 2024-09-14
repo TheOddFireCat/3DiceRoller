@@ -1,0 +1,23 @@
+--atlas -f rgba8888 -z auto
+hl_arrows.png
+hl_ltrbtn.png
+ltrbtn_disco_b_on.png
+ltrbtn_disco_a_on.png
+ltrbtn_disco_x_on.png
+ltrbtn_disco_y_on.png
+hl_dice_border.png
+hl_dice_d2.png
+hl_dice_d4.png
+hl_dice_d6.png
+hl_dice_d20d8.png
+hl_dice_d10.png
+hl_dice_d12.png
+hl_dice_d20d8.png
+hl_select_f1.png
+hl_select_f2.png
+hl_tray_d2.png
+hl_tray_d4.png
+hl_tray_d6.png
+hl_tray_d8.png
+hl_tray_d10.png
+hl_tray_d12d20.png

@@ -1,0 +1,5 @@
+--atlas -f rgba8888 -z auto
+bgtop_ui.png
+bgbottom_ui.png
+bottom_ui_fade.png
+bottom_ui_info_page.png

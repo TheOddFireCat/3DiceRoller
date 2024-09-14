@@ -1,0 +1,26 @@
+--atlas -f rgba8888 -z auto
+arrow_btn_upR.png
+arrow_btn_upH.png
+arrow_btn_downR.png
+arrow_btn_downH.png
+arrow_btn_leftR.png
+arrow_btn_leftH.png
+arrow_btn_rightR.png
+arrow_btn_rightH.png
+B_R.png
+B_H.png
+A_R.png
+A_H.png
+X_R.png
+X_H.png
+Y_R.png
+Y_H.png
+btn_right_r.png
+btn_right_h.png
+btn_left_open_r.png
+btn_left_open_h.png
+btn_left_close_r.png
+btn_left_close_h.png
+c_stick_r.png
+c_stick_h_right.png
+c_stick_h_left.png
