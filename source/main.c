@@ -2108,7 +2108,7 @@ int main(int argc, char* argv[]) {
 				// Held -> Released
 				C2D_DrawSprite(&sprites[28].spr);
 
-				if (k_up & KEY_CPAD_LEFT || k_up & KEY_CPAD_RIGHT || release_r_sound_flag) {
+				if (k_up & KEY_CPAD_LEFT || k_up & KEY_CPAD_RIGHT || (release_r_sound_flag && info_mode == INFO_CLOSED)) {
 					play_sound(BTN_RELEASE);
 				}
 			}
@@ -2676,7 +2676,7 @@ int main(int argc, char* argv[]) {
 				C2D_DrawSprite(&sprites[22].spr);
 			
 				// click release sound
-				if ((release_r_sound_flag || k_up & KEY_R || (r_hit ^ r_hit_old && r_hit_old)) && info_mode == INFO_CLOSED) {
+				if (((release_r_sound_flag && info_mode == INFO_CLOSED) || k_up & KEY_R || (r_hit ^ r_hit_old && r_hit_old)) && info_mode == INFO_CLOSED) {
 					if (held_sfx_toggle || release_r_sound_flag) {
 						play_sound(BTN_RELEASE_HELD);
 						if (release_r_sound_flag) release_r_sound_flag = 0;
