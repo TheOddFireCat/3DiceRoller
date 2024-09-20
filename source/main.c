@@ -12,7 +12,8 @@
 #include <ncsnd.h>
 
 // Defaults
-#define MAX_SPRITES 100
+#define DICE_MAX_SPRITES 100
+#define FISHING_MAX_SPRITES 50
 #define TOP_SCREEN_WIDTH  400
 #define TOP_SCREEN_HEIGHT 240
 #define BOTTOM_SCREEN_WIDTH 320
@@ -21,13 +22,17 @@
 
 #define DICE_ROLL_AMOUNT 10
 
+#define GAME_DICE 0
+#define GAME_FISHING 1
+
 // dice related text
 #define DICE_AMOUNT_TEXT_SIZE 1.0f
 #define DICE_TYPE_TEXT_SIZE 1.0f
 #define DICE_TRAY_TEXT_SIZE 0.6f
-#define DICE_SIZE_REDUCE 0.1f
+#define TEXT_SIZE_REDUCE 0.1f
 #define DICE_ROLL_TEXT_SIZE 0.8f
 
+#define FISHING_FLAVOR_SIZE 0.6f
 #define TOTAL_TEXT_SIZE 1.2f
 #define COPYRIGHT_TEXT_SIZE 0.4f
 
@@ -45,6 +50,11 @@
 // frame related
 #define FRAMES_HELD_MIN 0.30f // 1 second = 60 frames = 0.60f
 #define FRAMES_HELD_MAX 2.00f
+
+#define FRAMES_IN_SEC 0.60f
+
+#define FRAMES_LOOT_WAIT 0.90f
+#define FRAMES_NO_INPUT_MAX 1.20f
 
 // floaty dice controls
 #define WAVE_MOVE_MULTIPLIER 4
@@ -76,6 +86,7 @@
 #define DICE_TRAY_MIN 0
 // ------------------------------------------------------------
 
+// -- Structs: --------------------------------------------
 // Simple sprite struct
 typedef struct
 {
@@ -101,7 +112,22 @@ typedef struct {
 	int total;
 } DiceRollResult;
 
+
 // -- VARIABLES: --------------------------------------------
+// Fishing
+	int game_mode = 0; // 0 = Dice, 1 = Fishing
+	int rod_not_cast = 1, rest_engaged = 1; 
+	int animate_cast = 0, animate_reel = 0, animate_wobble = 0; 
+	float water_animation = 0.0f, rod_cast_animation = 0.0f, rod_wobble_animation = 0.0f, rod_reel_animation = 0.0f;
+	float frames_passed_no_input = 0.0f, frame_clock = 0.0f, loot_wait_clock = 0.0f;
+
+	int rarity = 0, rarity_display = 0, variant = 0, variant_display = 0;
+	int rand_attrib1 = 0, rand_attrib2 = 0, gold_worth = 0, gold_total = 0;
+	int rand_attrib1_disp = 0, rand_attrib2_disp = 0, gold_worth_disp = 0;
+	
+	int loot_got = 0, activate_loot = 0;
+
+// Dice
 	// Left UI;__________________________________________________
 	// Data
 	int amount = AMOUNT_MIN, dice_col = 0, dice_col_old = 0;
@@ -211,7 +237,7 @@ typedef struct {
 	// ----------------------------------------------------------
 
 // -- Text: -------------------------------------------------
-	C2D_TextBuf g_dynamic_roll_buf, g_dynamic_dice_buf, g_static_buf;
+	C2D_TextBuf g_dynamic_roll_buf, g_dynamic_dice_buf, g_dynamic_fishing_buf,g_static_buf;
 	C2D_Font font[1];
 	C2D_Text g_static_copyright_text[4], g_static_total_text;
 
@@ -231,8 +257,9 @@ typedef struct {
 	PrintConsole debug_console;
 
 // -- Graphics/Sprites: -------------------------------------
-	static C2D_SpriteSheet bg_sprite_sheet, btn_sprite_sheet, hl_sprite_sheet, dice_sprite_sheet;
-	static Sprite sprites[MAX_SPRITES];
+	static C2D_SpriteSheet bg_sprite_sheet, btn_sprite_sheet, hl_sprite_sheet, dice_sprite_sheet, fishing_sprite_sheet;
+	static Sprite sprites[DICE_MAX_SPRITES];
+	static Sprite fishing_sprites[FISHING_MAX_SPRITES];
 
 // -- Audio/Sounds: -----------------------------------------
 const char* file_list[] =
@@ -252,6 +279,32 @@ const char* file_list[] =
 SoundTuple cwav_list[CWAV_LIST_MAX] = {{"\0", NULL}};
 
 // -- Functions: --------------------------------------------
+/*
+Sprite Alloc;
+
+dice;
+0, 1, 80, 81; - bg and windows
+2 - 30; - buttons
+32 - 54; - highlights
+60 - 66; - big dice
+70 - 76; - tray dice
+
+fishing;
+0 - 2; - docks
+3; - water
+4 - 8; - fishing rod throwing frames
+9; - fishing rod still
+10 - 13; - fishing rod wobble
+14; - fishing rod pull - depricated
+15 - 22; - fishing rod reel
+23 - 33; - water
+34 - 36; - junk
+37 - 39; - fish
+40 - 42; - treasure
+43, 44; - a button
+45, 46; - exits
+*/
+
 //---------------------------------------------------------------------------------
 static void initBGSprites() {
 //---------------------------------------------------------------------------------
@@ -774,11 +827,302 @@ static void initDiceSprites() {
 }
 
 //---------------------------------------------------------------------------------
+static void initFishingSprites() {
+//---------------------------------------------------------------------------------
+	// array locations
+	// docks
+	Sprite* fishing_dockdef_sprite = &fishing_sprites[0];
+	Sprite* fishing_dockprethrow_sprite = &fishing_sprites[1];
+	Sprite* fishing_dockrest_sprite = &fishing_sprites[2];
+
+	//water actual
+	Sprite* fishing_water_sprite = &fishing_sprites[3];
+
+	// Docks --------------------------------
+	// cast / default
+	C2D_SpriteFromSheet(&fishing_dockdef_sprite->spr, fishing_sprite_sheet, 0);
+	C2D_SpriteSetCenter(&fishing_dockdef_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_dockdef_sprite->spr, 47, 26);
+
+	// pre cast
+	C2D_SpriteFromSheet(&fishing_dockprethrow_sprite->spr, fishing_sprite_sheet, 1);
+	C2D_SpriteSetCenter(&fishing_dockprethrow_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_dockprethrow_sprite->spr, 47, 26);
+	
+	// rest
+	C2D_SpriteFromSheet(&fishing_dockrest_sprite->spr, fishing_sprite_sheet, 2);
+	C2D_SpriteSetCenter(&fishing_dockrest_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_dockrest_sprite->spr, 47, 26);
+	
+	// water actual
+	C2D_SpriteFromSheet(&fishing_water_sprite->spr, fishing_sprite_sheet, 3);
+	C2D_SpriteSetCenter(&fishing_water_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_water_sprite->spr, 105, 74);
+	// -------------------------------------
+
+	// fishing rod
+	Sprite* fishing_rod_throw1_sprite = &fishing_sprites[4];
+	Sprite* fishing_rod_throw2_sprite = &fishing_sprites[5];
+	Sprite* fishing_rod_throw3_sprite = &fishing_sprites[6];
+	Sprite* fishing_rod_throw4_sprite = &fishing_sprites[7];
+	Sprite* fishing_rod_throw5_sprite = &fishing_sprites[8];
+
+	Sprite* fishing_rod_still_sprite = &fishing_sprites[9];
+
+	Sprite* fishing_rod_wobbl1_sprite = &fishing_sprites[10];
+	Sprite* fishing_rod_wobbl2_sprite = &fishing_sprites[11];
+	Sprite* fishing_rod_wobbl3_sprite = &fishing_sprites[12];
+	Sprite* fishing_rod_wobbl4_sprite = &fishing_sprites[13];
+
+	Sprite* fishing_rod_reel1_sprite = &fishing_sprites[15];
+	Sprite* fishing_rod_reel2_sprite = &fishing_sprites[16];
+	Sprite* fishing_rod_reel3_sprite = &fishing_sprites[17];
+	Sprite* fishing_rod_reel4_sprite = &fishing_sprites[18];
+	Sprite* fishing_rod_reel5_sprite = &fishing_sprites[19];
+	Sprite* fishing_rod_reel6_sprite = &fishing_sprites[20];
+	Sprite* fishing_rod_reel7_sprite = &fishing_sprites[21];
+	Sprite* fishing_rod_reel8_sprite = &fishing_sprites[22];
+
+	// Fishing rod --------------------------------
+	// throws;
+	// thr1
+	C2D_SpriteFromSheet(&fishing_rod_throw1_sprite->spr, fishing_sprite_sheet, 4);
+	C2D_SpriteSetCenter(&fishing_rod_throw1_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_throw1_sprite->spr, 145, 36);
+	// thr2
+	C2D_SpriteFromSheet(&fishing_rod_throw2_sprite->spr, fishing_sprite_sheet, 5);
+	C2D_SpriteSetCenter(&fishing_rod_throw2_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_throw2_sprite->spr, 145, 36);
+	// thr3
+	C2D_SpriteFromSheet(&fishing_rod_throw3_sprite->spr, fishing_sprite_sheet, 6);
+	C2D_SpriteSetCenter(&fishing_rod_throw3_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_throw3_sprite->spr, 145, 36);
+	// thr4
+	C2D_SpriteFromSheet(&fishing_rod_throw4_sprite->spr, fishing_sprite_sheet, 7);
+	C2D_SpriteSetCenter(&fishing_rod_throw4_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_throw4_sprite->spr, 145, 36);
+	// thr5
+	C2D_SpriteFromSheet(&fishing_rod_throw5_sprite->spr, fishing_sprite_sheet, 8);
+	C2D_SpriteSetCenter(&fishing_rod_throw5_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_throw5_sprite->spr, 145, 36);
+	// ------
+
+	// still
+	C2D_SpriteFromSheet(&fishing_rod_still_sprite->spr, fishing_sprite_sheet, 9);
+	C2D_SpriteSetCenter(&fishing_rod_still_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_still_sprite->spr, 145, 36);
+	// ------
+
+	// wobble;
+	// wobbl1
+	C2D_SpriteFromSheet(&fishing_rod_wobbl1_sprite->spr, fishing_sprite_sheet, 10);
+	C2D_SpriteSetCenter(&fishing_rod_wobbl1_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_wobbl1_sprite->spr, 145, 36);
+	// wobbl2
+	C2D_SpriteFromSheet(&fishing_rod_wobbl2_sprite->spr, fishing_sprite_sheet, 11);
+	C2D_SpriteSetCenter(&fishing_rod_wobbl2_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_wobbl2_sprite->spr, 145, 36);
+	// wobbl3
+	C2D_SpriteFromSheet(&fishing_rod_wobbl3_sprite->spr, fishing_sprite_sheet, 12);
+	C2D_SpriteSetCenter(&fishing_rod_wobbl3_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_wobbl3_sprite->spr, 145, 36);
+	// wobbl4
+	C2D_SpriteFromSheet(&fishing_rod_wobbl4_sprite->spr, fishing_sprite_sheet, 13);
+	C2D_SpriteSetCenter(&fishing_rod_wobbl4_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_wobbl4_sprite->spr, 145, 36);
+	// ------
+	
+	// reel;
+	// reel1
+	C2D_SpriteFromSheet(&fishing_rod_reel1_sprite->spr, fishing_sprite_sheet, 14);
+	C2D_SpriteSetCenter(&fishing_rod_reel1_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_reel1_sprite->spr, 145, 36);
+	// reel2
+	C2D_SpriteFromSheet(&fishing_rod_reel2_sprite->spr, fishing_sprite_sheet, 15);
+	C2D_SpriteSetCenter(&fishing_rod_reel2_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_reel2_sprite->spr, 145, 36);
+	// reel3
+	C2D_SpriteFromSheet(&fishing_rod_reel3_sprite->spr, fishing_sprite_sheet, 16);
+	C2D_SpriteSetCenter(&fishing_rod_reel3_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_reel3_sprite->spr, 145, 36);
+	// reel4
+	C2D_SpriteFromSheet(&fishing_rod_reel4_sprite->spr, fishing_sprite_sheet, 17);
+	C2D_SpriteSetCenter(&fishing_rod_reel4_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_reel4_sprite->spr, 145, 36);
+	// reel5
+	C2D_SpriteFromSheet(&fishing_rod_reel5_sprite->spr, fishing_sprite_sheet, 18);
+	C2D_SpriteSetCenter(&fishing_rod_reel5_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_reel5_sprite->spr, 145, 36);
+	// reel6
+	C2D_SpriteFromSheet(&fishing_rod_reel6_sprite->spr, fishing_sprite_sheet, 19);
+	C2D_SpriteSetCenter(&fishing_rod_reel6_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_reel6_sprite->spr, 145, 36);
+	// reel7
+	C2D_SpriteFromSheet(&fishing_rod_reel7_sprite->spr, fishing_sprite_sheet, 20);
+	C2D_SpriteSetCenter(&fishing_rod_reel7_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_reel7_sprite->spr, 145, 36);
+	// reel8
+	C2D_SpriteFromSheet(&fishing_rod_reel8_sprite->spr, fishing_sprite_sheet, 21);
+	C2D_SpriteSetCenter(&fishing_rod_reel8_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_rod_reel8_sprite->spr, 145, 36);
+	// -------------------------------------
+
+	// water
+	Sprite* fishing_w1_sprite = &fishing_sprites[23];
+	Sprite* fishing_w2_sprite = &fishing_sprites[24];
+	Sprite* fishing_w3_sprite = &fishing_sprites[25];
+	Sprite* fishing_w4_sprite = &fishing_sprites[26];
+	Sprite* fishing_w5_sprite = &fishing_sprites[27];
+	Sprite* fishing_w6_sprite = &fishing_sprites[28];
+	Sprite* fishing_w7_sprite = &fishing_sprites[29];
+	Sprite* fishing_w8_sprite = &fishing_sprites[30];
+	Sprite* fishing_w9_sprite = &fishing_sprites[31];
+	Sprite* fishing_w10_sprite = &fishing_sprites[32];
+	Sprite* fishing_w11_sprite = &fishing_sprites[33];
+
+	
+	// water; --------------------------------
+	// water1
+	C2D_SpriteFromSheet(&fishing_w1_sprite->spr, fishing_sprite_sheet, 22);
+	C2D_SpriteSetCenter(&fishing_w1_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_w1_sprite->spr, 109, 92);
+	// water2
+	C2D_SpriteFromSheet(&fishing_w2_sprite->spr, fishing_sprite_sheet, 23);
+	C2D_SpriteSetCenter(&fishing_w2_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_w2_sprite->spr, 109, 92);
+	// water3
+	C2D_SpriteFromSheet(&fishing_w3_sprite->spr, fishing_sprite_sheet, 24);
+	C2D_SpriteSetCenter(&fishing_w3_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_w3_sprite->spr, 109, 92);
+	// water4
+	C2D_SpriteFromSheet(&fishing_w4_sprite->spr, fishing_sprite_sheet, 25);
+	C2D_SpriteSetCenter(&fishing_w4_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_w4_sprite->spr, 109, 92);
+	// water5
+	C2D_SpriteFromSheet(&fishing_w5_sprite->spr, fishing_sprite_sheet, 26);
+	C2D_SpriteSetCenter(&fishing_w5_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_w5_sprite->spr, 109, 92);
+	// water6
+	C2D_SpriteFromSheet(&fishing_w6_sprite->spr, fishing_sprite_sheet, 27);
+	C2D_SpriteSetCenter(&fishing_w6_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_w6_sprite->spr, 109, 92);
+	// water7
+	C2D_SpriteFromSheet(&fishing_w7_sprite->spr, fishing_sprite_sheet, 28);
+	C2D_SpriteSetCenter(&fishing_w7_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_w7_sprite->spr, 109, 92);
+	// water8
+	C2D_SpriteFromSheet(&fishing_w8_sprite->spr, fishing_sprite_sheet, 29);
+	C2D_SpriteSetCenter(&fishing_w8_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_w8_sprite->spr, 109, 92);
+	// water9
+	C2D_SpriteFromSheet(&fishing_w9_sprite->spr, fishing_sprite_sheet, 30);
+	C2D_SpriteSetCenter(&fishing_w9_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_w9_sprite->spr, 109, 92);
+	// water10
+	C2D_SpriteFromSheet(&fishing_w10_sprite->spr, fishing_sprite_sheet, 31);
+	C2D_SpriteSetCenter(&fishing_w10_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_w10_sprite->spr, 109, 92);
+	// water11
+	C2D_SpriteFromSheet(&fishing_w11_sprite->spr, fishing_sprite_sheet, 32);
+	C2D_SpriteSetCenter(&fishing_w11_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_w11_sprite->spr, 109, 92);
+	// -------------------------------------
+
+	// loot
+	// junk
+	Sprite* fishing_junk1_sprite = &fishing_sprites[34];
+	Sprite* fishing_junk2_sprite = &fishing_sprites[35];
+	Sprite* fishing_junk3_sprite = &fishing_sprites[36];
+
+	
+	// junk; --------------------------------
+	// junk1; can
+	C2D_SpriteFromSheet(&fishing_junk1_sprite->spr, fishing_sprite_sheet, 33);
+	C2D_SpriteSetCenter(&fishing_junk1_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_junk1_sprite->spr, 144, 64);
+	// junk2; boot
+	C2D_SpriteFromSheet(&fishing_junk2_sprite->spr, fishing_sprite_sheet, 34);
+	C2D_SpriteSetCenter(&fishing_junk2_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_junk2_sprite->spr, 144, 64);
+	// junk3; bottle
+	C2D_SpriteFromSheet(&fishing_junk3_sprite->spr, fishing_sprite_sheet, 35);
+	C2D_SpriteSetCenter(&fishing_junk3_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_junk3_sprite->spr, 144, 64);
+
+	// fish
+	Sprite* fishing_fish1_sprite = &fishing_sprites[37];
+	Sprite* fishing_fish2_sprite = &fishing_sprites[38];
+	Sprite* fishing_fish3_sprite = &fishing_sprites[39];
+
+	// fish; --------------------------------
+	// fish1
+	C2D_SpriteFromSheet(&fishing_fish1_sprite->spr, fishing_sprite_sheet, 36);
+	C2D_SpriteSetCenter(&fishing_fish1_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_fish1_sprite->spr, 144, 64);
+	// fish2
+	C2D_SpriteFromSheet(&fishing_fish2_sprite->spr, fishing_sprite_sheet, 37);
+	C2D_SpriteSetCenter(&fishing_fish2_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_fish2_sprite->spr, 144, 64);
+	// fish3; shimp
+	C2D_SpriteFromSheet(&fishing_fish3_sprite->spr, fishing_sprite_sheet, 38);
+	C2D_SpriteSetCenter(&fishing_fish3_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_fish3_sprite->spr, 144, 64);
+
+	// treasure
+	Sprite* fishing_treasure1_sprite = &fishing_sprites[40];
+	Sprite* fishing_treasure2_sprite = &fishing_sprites[41];
+	Sprite* fishing_treasure3_sprite = &fishing_sprites[42];
+
+	// treasure; --------------------------------
+	// treasure1; sword
+	C2D_SpriteFromSheet(&fishing_treasure1_sprite->spr, fishing_sprite_sheet, 39);
+	C2D_SpriteSetCenter(&fishing_treasure1_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_treasure1_sprite->spr, 144, 64);
+	// treasure2; chest
+	C2D_SpriteFromSheet(&fishing_treasure2_sprite->spr, fishing_sprite_sheet, 40);
+	C2D_SpriteSetCenter(&fishing_treasure2_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_treasure2_sprite->spr, 144, 64);
+	// treasure3; tome
+	C2D_SpriteFromSheet(&fishing_treasure3_sprite->spr, fishing_sprite_sheet, 41);
+	C2D_SpriteSetCenter(&fishing_treasure3_sprite->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_treasure3_sprite->spr, 144, 64);
+	// -------------------------------------
+
+	Sprite* fishing_btn_a_r = &fishing_sprites[43];
+	Sprite* fishing_btn_a_h = &fishing_sprites[44];
+
+	// A Button;___________________________________________________________
+	// A - Released
+	C2D_SpriteFromSheet(&fishing_btn_a_r->spr, fishing_sprite_sheet, 42);
+	C2D_SpriteSetCenter(&fishing_btn_a_r->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_btn_a_r->spr, 287, 113);
+	// A - Held
+	C2D_SpriteFromSheet(&fishing_btn_a_h->spr, fishing_sprite_sheet, 43);
+	C2D_SpriteSetCenter(&fishing_btn_a_h->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_btn_a_h->spr, 287, 113);
+	// -------------------------------------------------------------------
+
+	Sprite* fishing_btn_start = &fishing_sprites[45];
+	Sprite* fishing_btn_select = &fishing_sprites[46];
+
+	// btn - start
+	C2D_SpriteFromSheet(&fishing_btn_start->spr, fishing_sprite_sheet, 44);
+	C2D_SpriteSetCenter(&fishing_btn_start->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_btn_start->spr, 214, 225);
+	// btn - select
+	C2D_SpriteFromSheet(&fishing_btn_select->spr, fishing_sprite_sheet, 45);
+	C2D_SpriteSetCenter(&fishing_btn_select->spr, 0.0f, 0.0f);
+	C2D_SpriteSetPos(&fishing_btn_select->spr, 14, 225);
+	// -------------------------------------------------------------------
+}
+
+//---------------------------------------------------------------------------------
 static void initSceneText() {
 //---------------------------------------------------------------------------------
 	// set up dynamic buffer, support up to 4096 glyphs
 	g_dynamic_roll_buf = C2D_TextBufNew(4096);
 	g_dynamic_dice_buf = C2D_TextBufNew(4096);
+	g_dynamic_fishing_buf = C2D_TextBufNew(4096);
 	g_static_buf = C2D_TextBufNew(4096);
 
 	//load fonts
@@ -837,7 +1181,7 @@ static void renderRollText(int current_index, int display_page_n) {
 		snprintf(buf_notation, sizeof(buf_notation), "%s", roll_queue[i].notation);
 
 		// Size calculation
-		float notation_size = DICE_AMOUNT_TEXT_SIZE - DICE_SIZE_REDUCE * (strlen(buf_notation) - 1);
+		float notation_size = DICE_AMOUNT_TEXT_SIZE - TEXT_SIZE_REDUCE * (strlen(buf_notation) - 1);
 
 		// parse notation & optimize
 		C2D_TextFontParse(&dyn_notation_text, font[0], g_dynamic_roll_buf, buf_notation);
@@ -895,8 +1239,8 @@ static void renderRollText(int current_index, int display_page_n) {
 			float res1_len = floor(log10(abs(res1)));
 			float res2_len = strlen(buf_result2);
 
-			float result1_size = DICE_ROLL_TEXT_SIZE - DICE_SIZE_REDUCE * 1.5 * res1_len;
-			float result2_size = DICE_ROLL_TEXT_SIZE - (DICE_SIZE_REDUCE / 1.25) * res2_len;
+			float result1_size = DICE_ROLL_TEXT_SIZE - TEXT_SIZE_REDUCE * 1.5 * res1_len;
+			float result2_size = DICE_ROLL_TEXT_SIZE - (TEXT_SIZE_REDUCE / 1.25) * res2_len;
 
 			// parse notation & optimize
 			C2D_TextFontParse(&dyn_res1_text, font[0], g_dynamic_roll_buf, buf_result1);
@@ -925,7 +1269,7 @@ static void renderRollText(int current_index, int display_page_n) {
 
 		// Size calculation
 		float local_len = floor(log10(abs(local_total)));
-		float local_size = DICE_AMOUNT_TEXT_SIZE - DICE_SIZE_REDUCE * local_len;
+		float local_size = DICE_AMOUNT_TEXT_SIZE - TEXT_SIZE_REDUCE * local_len;
 
 		// parse notation & optimize
 		C2D_TextFontParse(&dyn_local_total_text, font[0], g_dynamic_roll_buf, buf_local_total);
@@ -945,7 +1289,7 @@ static void renderRollText(int current_index, int display_page_n) {
 
 	// Size calculation
 	float total_len = floor(log10(abs(results_final_total)));
-	float total_size = TOTAL_TEXT_SIZE - DICE_SIZE_REDUCE * total_len;
+	float total_size = TOTAL_TEXT_SIZE - TEXT_SIZE_REDUCE * total_len;
 
 	// parse notation & optimize
 	C2D_TextFontParse(&dyn_total_amount_text, font[0], g_dynamic_roll_buf, buf_total_amount);
@@ -966,8 +1310,8 @@ static void renderDiceText(float amount_len, float type_len) {
 	C2D_Text dyn_dice_amount_text, dyn_dice_type_text, dyn_dice_tray_text;
 
 	// Size calculation
-	float amount_size = DICE_AMOUNT_TEXT_SIZE - DICE_SIZE_REDUCE * amount_len;
-	float type_size = DICE_TYPE_TEXT_SIZE - DICE_SIZE_REDUCE * type_len;
+	float amount_size = DICE_AMOUNT_TEXT_SIZE - TEXT_SIZE_REDUCE * amount_len;
+	float type_size = DICE_TYPE_TEXT_SIZE - TEXT_SIZE_REDUCE * type_len;
 
 	// update to current values
 	snprintf(buf_amount, sizeof(buf_amount), "%d", amount);
@@ -992,7 +1336,7 @@ static void renderDiceText(float amount_len, float type_len) {
 		snprintf(buf_tray, sizeof(buf_tray), "%d", tray[i].amount);
 
 		float tray_amount_len = floor(log10(abs(tray[i].amount)));
-		float tray_size = DICE_TRAY_TEXT_SIZE - (DICE_SIZE_REDUCE / 1.25) * tray_amount_len;
+		float tray_size = DICE_TRAY_TEXT_SIZE - (TEXT_SIZE_REDUCE / 1.25) * tray_amount_len;
 
 		// load amount
 		C2D_TextFontParse(&dyn_dice_tray_text, font[0], g_dynamic_dice_buf, buf_tray);
@@ -1003,6 +1347,107 @@ static void renderDiceText(float amount_len, float type_len) {
 		// draw
 		C2D_DrawText(&dyn_dice_tray_text, C2D_AlignCenter | C2D_AtBaseline | C2D_WithColor, 68.5f + 15.0 * i, 14.0f, 0.0f, tray_size, tray_size, C2D_Color32f(1.0f,1.0f,1.0f,1.0f));
 	}
+}
+
+//---------------------------------------------------------------------------------
+static void renderFishingText(int rarity_d, int variant_d, int gold, int gold_tot, int rand_att1, int rand_att2) {
+//---------------------------------------------------------------------------------
+	// clear buffer
+	C2D_TextBufClear(g_dynamic_fishing_buf);
+
+	// --- attrib text ---
+	// Generate big dice text
+	char buf_flavor[200] = "\0", buf_total_gold[6] = "\0";
+	C2D_Text dyn_flavor_text, dyn_gold_total_text;
+
+	snprintf(buf_total_gold, sizeof(buf_total_gold), "%dG", gold_tot);
+
+	// Size calculation
+	float totalg_len = floor(log10(abs(gold_tot))) - 1;
+	float totalg_size = 1.2f - TEXT_SIZE_REDUCE * totalg_len;
+
+	// update to current values
+	switch(rarity_d)
+	{
+		// junk
+		case 1:
+			switch (variant_d)
+			{
+				// can
+				case 0:
+					snprintf(buf_flavor, sizeof(buf_flavor), "You caught a %d year old [Can] worth %dG!", rand_att1, gold);
+					break;
+
+				// boot
+				case 1:
+					snprintf(buf_flavor, sizeof(buf_flavor), "You caught a [Boot] with %d\" laces worth %dG!", (rand_att1 * rand_att2) / 2, gold);
+					break;
+
+					
+				// bottle
+				case 2:
+					snprintf(buf_flavor, sizeof(buf_flavor), "You caught a [Bottle] filled with %d [Broken Dreams] worth %dG!", rand_att1, gold);
+					break;
+			}
+			break;
+			
+		// fish
+		case 2:
+			switch (variant_d)
+			{
+				// trout?
+				case 0:
+					snprintf(buf_flavor, sizeof(buf_flavor), "You caught a %d\"x%d\" [Trout] worth %dG!", rand_att1, rand_att2, gold);
+					break;
+
+				// cod?
+				case 1:
+					snprintf(buf_flavor, sizeof(buf_flavor), "You caught a %d\" [Fish] worth %dG!", rand_att1, gold);
+					break;
+
+					
+				// shimp?
+				case 2:
+					snprintf(buf_flavor, sizeof(buf_flavor), "You caught %d [Shrimp] worth %dG!", rand_att1 * rand_att2, gold);
+					break;
+			}
+			break;
+			
+		// treasure
+		case 3:
+			switch (variant_d)
+			{
+				// sword!!
+				case 0:
+					snprintf(buf_flavor, sizeof(buf_flavor), "You caught a %d\" lvl. %d [Sword] worth %dG!", rand_att1, rand_att2, gold);
+					break;
+
+				// treasure chest
+				case 1:
+					snprintf(buf_flavor, sizeof(buf_flavor), "You caught a [Treasure Chest] from %d years ago worth %dG!", rand_att1 * rand_att2, gold);
+					break;
+
+					
+				// spell tome
+				case 2:
+					snprintf(buf_flavor, sizeof(buf_flavor), "You caught a lvl. %d [Tome] containing %d useful spells worth %dG!", rand_att1, rand_att2, gold);
+					break;
+			}
+			break;
+	}
+
+	// Parse text
+	C2D_TextFontParse(&dyn_flavor_text, font[0], g_dynamic_fishing_buf, buf_flavor);
+	C2D_TextFontParse(&dyn_gold_total_text, font[0], g_dynamic_fishing_buf, buf_total_gold);
+
+	// Optimize
+	C2D_TextOptimize(&dyn_flavor_text);
+	C2D_TextOptimize(&dyn_gold_total_text);
+
+	// Display 
+	C2D_DrawText(&dyn_flavor_text, C2D_AlignCenter | C2D_AtBaseline | C2D_WithColor | C2D_WordWrap, 199.5f, 191.0f, 1.0f, FISHING_FLAVOR_SIZE, FISHING_FLAVOR_SIZE, C2D_Color32f(1.0f,1.0f,1.0f,1.0f), 224.0f);
+	C2D_DrawText(&dyn_gold_total_text, C2D_AlignCenter | C2D_AtBaseline | C2D_WithColor, 351.5f, 207.0f, 1.0f, totalg_size, totalg_size, C2D_Color32f(1.0f,1.0f,1.0f,1.0f));
+
 }
 
 //---------------------------------------------------------------------------------
@@ -1020,6 +1465,7 @@ static void exitDiceText() {
 	// Delete the text buffers
 	C2D_TextBufDelete(g_dynamic_roll_buf);
 	C2D_TextBufDelete(g_dynamic_dice_buf);
+	C2D_TextBufDelete(g_dynamic_fishing_buf);
 	C2D_TextBufDelete(g_static_buf);
 	C2D_FontFree(font[0]);
 }
@@ -1328,12 +1774,16 @@ int main(int argc, char* argv[]) {
 
 	dice_sprite_sheet = C2D_SpriteSheetLoad("romfs:/gfx/dice_sprites.t3x");
 	if (!dice_sprite_sheet) svcBreak(USERBREAK_PANIC);
+	
+	fishing_sprite_sheet = C2D_SpriteSheetLoad("romfs:/gfx/fishing_sprites.t3x");
+	if (!fishing_sprite_sheet) svcBreak(USERBREAK_PANIC);
 
 	// Initialize sprites
 	initBGSprites();
 	initButtonSprites();
 	initHLSprites();
 	initDiceSprites();
+	initFishingSprites();
 
 	// Initialize dice tray
 	resetDiceTray();
@@ -1369,6 +1819,22 @@ int main(int argc, char* argv[]) {
 		if (k_down & KEY_START) {
 			break; // break in order to return to hbmenu
 		}
+
+		if (k_down & KEY_SELECT) {
+			switch (game_mode)
+			{
+				// Dice -> Fishing
+				case GAME_DICE:
+					game_mode = GAME_FISHING;
+					break;
+
+				// Fishing -> Dice
+				case GAME_FISHING:
+					game_mode = GAME_DICE;
+					break;
+
+			}
+		}
 		
 		// --------------------------------------------------------------
 		// Touch Hit Detect
@@ -1397,717 +1863,900 @@ int main(int argc, char* argv[]) {
 		r_hit = pnpoly(sldrbtn_nvert, r_hitx, r_hity, touch.px, touch.py);
 		l_hit = pnpoly(sldrbtn_nvert, l_hitx, l_hity, touch.px, touch.py);
 
-		// Console Debug
-		if (0) {
-			consoleSelect(&debug_console);
-			printf("\x1b[2;1HCPU:     %6.2f%%\x1b[K", C3D_GetProcessingTime()*6.0f);
-			printf("\x1b[3;1HGPU:     %6.2f%%\x1b[K", C3D_GetDrawingTime()*6.0f);
-			printf("\x1b[4;1HCmdBuf:  %6.2f%%\x1b[K", C3D_GetCmdBufUsage()*100.0f);
-			printf("\x1b[5;1HAmount:  %6d\x1b[K", amount);
-			printf("\x1b[6;1HType:  %6d\x1b[K", types[type_selected]);
-			printf("\x1b[7;1HMode:  %6d\x1b[K", dice_mode);
-			printf("\x1b[8;1HDice Selected:  %6d\x1b[K", dice_select);
-			printf("\x1b[9;1HFrames Held:  %6.2f\x1b[K", time_btn_held);
-			printf("\x1b[10;1HSelect Clock:  %6.2f\x1b[K", select_clock);
-			printf("\x1b[11;1HSelect Mod:  %6d\x1b[K", select_mod);
-			printf("\x1b[12;1H\"Sin()\" Val:  %6.2f\x1b[K", sin_move_rads);
-			printf("\x1b[13;0H%03d; %03d", touch.px, touch.py); //Print the touch screen coordinates
-		}
-
 		// Render the scene
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 
-	// --------------------------------------------------------------
-	// top screen
-	// --------------------------------------------------------------
-		C2D_TargetClear(top, C2D_Color32f(0.0f, 0.0f, 0.0f, 1.0f));
-		C2D_SceneBegin(top);
-		
+		if (game_mode == GAME_FISHING) {
 		// --------------------------------------------------------------
-		// background
+		// top screen
 		// --------------------------------------------------------------
-		C2D_DrawSprite(&sprites[0].spr);
+			C2D_TargetClear(top, C2D_Color32f(0.0f, 0.0f, 0.0f, 1.0f));
+			C2D_SceneBegin(top);
 
-		// --------------------------------------------------------------
-		// Dice Roll Text
-		// --------------------------------------------------------------
-		renderRollText(roll_die_index, display_page);
+			// display loot
+			if (loot_got) {
+				renderFishingText(rarity_display, variant_display, gold_worth_disp, gold_total, rand_attrib1_disp, rand_attrib2_disp);
 
-		// --------------------------------------------------------------
-		// C pad
-		// --------------------------------------------------------------
-		if (is_rolling == CURRENTLY_ROLLING) {
-			C2D_DrawSpriteTinted(&sprites[28].spr, &disabled_btn_tint);
-		} else if (k_down & KEY_CPAD_LEFT || k_held & KEY_CPAD_LEFT) {
-			// Released -> Held Left
-			C2D_DrawSprite(&sprites[30].spr);
-
-			// move to 2nd page if there are results
-			if (display_page == 1 && result_list_len > 0) display_page = 0; 
-
-			if (k_down & KEY_CPAD_LEFT) play_sound(BTN_CLICK);
-
-		} else if (k_down & KEY_CPAD_RIGHT || k_held & KEY_CPAD_RIGHT) {
-			// Released -> Held Right
-			C2D_DrawSprite(&sprites[29].spr);
-
-			// move to 1st page
-			if (display_page == 0 && result_list_len > PAGE_DISPLAY_MAX) display_page = 1; 
-				
-			if (k_down & KEY_CPAD_RIGHT) play_sound(BTN_CLICK);
-
-		} else {
-			// Held -> Released
-			C2D_DrawSprite(&sprites[28].spr);
-
-			if (k_up & KEY_CPAD_LEFT || k_up & KEY_CPAD_RIGHT || release_r_sound_flag) {
-				play_sound(BTN_RELEASE);
-			}
-		}
-
-		// --------------------------------------------------------------
-		// Dice Rolling
-		// --------------------------------------------------------------
-		if (is_rolling == CURRENTLY_ROLLING && is_rolling_old) {
-
-			// --------------------------------------------------------------
-			// Dice Rolling Mechanism
-			// --------------------------------------------------------------
-			// check if the current position in queue is the end, if so, end this rolling thing
-			if (current_die_index >= die_queue_len) {
-				// finished rolling all the dice
-				is_rolling = READY_TO_ROLL;
-	
-				// reset variables
-				roll_frames = 0.0f;
-				current_die_index = 0;
-				release_r_sound_flag = 1;
-
-				// if not at the end, check if the current die was rolled, if so, roll it
-				// rand rolled makes it cycle through some numbers before committing
-			} else if (!was_rolled) {
-				// roll dice
-				rollDiceQueue(current_die_index);
-
-				// mark rolled
-				was_rolled = 1;
-			}
-
-			// once 100 frames pass, and it rolled, move on to next dice in queue
-			if (roll_frames >= FRAMES_HELD_MAX / 2 && is_rolling == CURRENTLY_ROLLING && was_rolled) {
-				current_die_index++;
-				if (current_die_index >= PAGE_DISPLAY_MAX && result_list_len > PAGE_DISPLAY_MAX) {
-					display_page = 1;
-				}
-
-				if (roll_die_index < result_list_len) {
-					roll_die_index++;
-				}
-				
-				was_rolled = 0;
-				roll_frames = 0.0f;
-			} else if (roll_frames < FRAMES_HELD_MAX) roll_frames += 0.01;
-		}
-
-	// --------------------------------------------------------------
-	// bottom screen
-	// --------------------------------------------------------------
-		C2D_TargetClear(bot, C2D_Color32f(0.0f, 0.0f, 0.0f, 1.0f));
-		C2D_SceneBegin(bot);
-
-		// --------------------------------------------------------------
-		// background
-		// --------------------------------------------------------------
-		C2D_DrawSprite(&sprites[1].spr);
-
-		// --------------------------------------------------------------
-		// Dice
-		// --------------------------------------------------------------
-		// Middle Bit
-		// Float the dice
-		sin_move_rads += 0.01f * WAVE_SPEED_MULTIPLIER;
-		if (sin_move_rads > M_PI * 2) sin_move_rads = 0;
-
-		float dice_sin_pos_add = sinf(sin_move_rads) * WAVE_MOVE_MULTIPLIER;
-
-		// big dice - info toggle
-		if (info_mode == INFO_CLOSED) {
-			C2D_SpriteSetPos(&sprites[39+type_selected].spr, BOTTOM_SCREEN_WIDTH / 2, BOTTOM_SCREEN_HEIGHT / 2 + 8 + dice_sin_pos_add);
-			C2D_SpriteSetPos(&sprites[60+type_selected].spr, BOTTOM_SCREEN_WIDTH / 2, BOTTOM_SCREEN_HEIGHT / 2 + 8 + dice_sin_pos_add);
-
-			// Type Visualization - dice actual
-			C2D_DrawSprite(&sprites[60+type_selected].spr);
-
-			// Mode Visualization - dice aura
-			switch (dice_mode) {
-				// Normal
-				case 0:
-					C2D_DrawSprite(&sprites[39+type_selected].spr);
-					break;
-					
-				// Advantage
-				case 1:
-					C2D_DrawSpriteTinted(&sprites[39+type_selected].spr, &advantage_tint);
-					break;
-					
-				// Disadvantage
-				case -1:
-					C2D_DrawSpriteTinted(&sprites[39+type_selected].spr, &disadvantage_tint);
-					break;
-			}
-		}
-
-		// --------------------------------------------------------------
-		// UI Text
-		// --------------------------------------------------------------
-		// Dice Text
-		float amount_digits = floor(log10(abs(amount)));
-		float type_digits = floor(log10(abs(types[type_selected])));
-		renderDiceText(amount_digits, type_digits);
-
-		// ------------------------------------------------------
-		// buttons;
-		// ------------------------------------------------------
-		// different sfx toggle
-		if (time_btn_held >= FRAMES_HELD_MIN) {
-			held_sfx_toggle = 1;
-		} else {
-			held_sfx_toggle = 0;
-		}
-
-		// reset time held if these were released or not pressed
-		if (!(k_held) && \
-			(!a_up_hit && !a_down_hit && !t_up_hit && !t_down_hit  && \
-			!r_hit && !l_hit && \
-			!btn_b_hit && !btn_a_hit && !btn_x_hit && !btn_y_hit)) {
-			time_btn_held = 0.0f;
-		}
-
-		// info toggle
-		if (info_mode == INFO_CLOSED) {
-			// button UP visual
-			if ( k_down & KEY_DUP || k_held & KEY_DUP) {
-				if (k_down & KEY_DUP) play_sound(BTN_CLICK);
-
-				switch (dice_col)
+				switch(rarity_display)
 				{
-					// AMOUNT column selected
-					case 0:
-					// Amount: Released -> Held
-						C2D_DrawSprite(&sprites[3].spr);
-						C2D_DrawSprite(&sprites[6].spr);
-
-						if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-						if ((k_down & KEY_DUP || time_btn_held >= FRAMES_HELD_MIN) && amount < AMOUNT_MAX) {
-							amount++;
-						}
-					break;
-					// TYPE column selected
+					// junk
 					case 1:
-						C2D_DrawSprite(&sprites[2].spr);
-						C2D_DrawSprite(&sprites[7].spr);
-
-						if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-						if ((k_down & KEY_DUP || time_btn_held >= FRAMES_HELD_MIN) && type_selected < TYPE_MAX) {
-							type_selected++;
-						}
-					break;
-				}
-			} else if ( a_up_hit || t_up_hit) {
-				if (a_up_hit) {
-					C2D_DrawSprite(&sprites[3].spr);
-					if (dice_col) dice_col = 0;
-					
-					if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-					if ((a_up_hit ^ a_up_hit_old || time_btn_held >= FRAMES_HELD_MIN) && amount < AMOUNT_MAX) {
-							amount++;
-
-							if (a_up_hit ^ a_up_hit_old) play_sound(BTN_CLICK);
-						}
-				} else {
-					C2D_DrawSprite(&sprites[2].spr);
-				}
-
-				if (t_up_hit) {
-					C2D_DrawSprite(&sprites[7].spr);
-					if (!dice_col) dice_col = 1;
-
-					if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-					if ((t_up_hit ^ t_up_hit_old || time_btn_held >= FRAMES_HELD_MIN) && type_selected < TYPE_MAX) {
-							type_selected++;
-
-							if (t_up_hit ^ t_up_hit_old) play_sound(BTN_CLICK);
-						}
-				} else {
-					C2D_DrawSprite(&sprites[6].spr);
-				}
-			} else {
-				// Held -> Released
-				C2D_DrawSprite(&sprites[2].spr);
-				C2D_DrawSprite(&sprites[6].spr);
-
-				if (k_up & KEY_DUP || (a_up_hit ^ a_up_hit_old && a_up_hit_old) || (t_up_hit ^ t_up_hit_old && t_up_hit_old)) {
-					if (held_sfx_toggle) {
-						play_sound(BTN_RELEASE_HELD);
-					} else play_sound(BTN_RELEASE);
-				}
-			}
-
-			// button DOWN visual
-			if (k_down & KEY_DDOWN || k_held & KEY_DDOWN) {
-				if (k_down & KEY_DDOWN) play_sound(BTN_CLICK);
-
-				switch (dice_col)
-				{
-					// AMOUNT column selected
-					case 0:
-						// Amount: Released -> Held
-						C2D_DrawSprite(&sprites[5].spr);
-						C2D_DrawSprite(&sprites[8].spr);
-
-						if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-						if ((k_down & KEY_DDOWN || time_btn_held >= FRAMES_HELD_MIN) && amount > AMOUNT_MIN) {
-							amount--;
-						}
-					break;
-					// TYPE column selected
-					case 1:
-						// Type: Released -> Held
-						C2D_DrawSprite(&sprites[4].spr);
-						C2D_DrawSprite(&sprites[9].spr);
-
-						if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-						if ((k_down & KEY_DDOWN || time_btn_held >= FRAMES_HELD_MIN) && type_selected > TYPE_MIN) {
-							type_selected--;
-						}
-					break;
-				}
-			} else if ( a_down_hit || t_down_hit) {
-				if (a_down_hit) {
-					C2D_DrawSprite(&sprites[5].spr);
-					if (dice_col) dice_col = 0;
-					
-					if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-					if ((a_down_hit ^ a_down_hit_old || time_btn_held >= FRAMES_HELD_MIN) && amount > AMOUNT_MIN) {
-							amount--;
-
-							if (a_down_hit ^ a_down_hit_old) play_sound(BTN_CLICK);
-						}
-				} else {
-					C2D_DrawSprite(&sprites[4].spr);
-				}
-
-				if (t_down_hit) {
-					C2D_DrawSprite(&sprites[9].spr);
-					if (!dice_col) dice_col = 1;
-
-					if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-					if ((t_down_hit ^ t_down_hit_old || time_btn_held >= FRAMES_HELD_MIN) && type_selected > TYPE_MIN) {
-							type_selected--;
-
-							if (t_down_hit ^ t_down_hit_old) play_sound(BTN_CLICK);
-						}
-				} else {
-					C2D_DrawSprite(&sprites[8].spr);
-				}
-			} else {
-				// Held -> Released
-				C2D_DrawSprite(&sprites[4].spr);
-				C2D_DrawSprite(&sprites[8].spr);
-
-				if (k_up & KEY_DDOWN || (a_down_hit ^ a_down_hit_old && a_down_hit_old) || (t_down_hit ^ t_down_hit_old && t_down_hit_old)) {
-					if (held_sfx_toggle) {
-						play_sound(BTN_RELEASE_HELD);
-					} else play_sound(BTN_RELEASE);
-				}
-			}
-
-			// Column Select
-			// button LEFT visual
-			if (k_down & KEY_DLEFT || k_held & KEY_DLEFT || left_hit) {
-				// Released -> Held
-				C2D_DrawSprite(&sprites[11].spr);
-
-				if (k_down & KEY_DLEFT || left_hit ^ left_hit_old) play_sound(BTN_CLICK);
-
-				if (dice_col) dice_col = 0;
-				if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-			} else {
-				// Held -> Released
-				C2D_DrawSprite(&sprites[10].spr);
-
-				// click release sound
-				if (k_up & KEY_DLEFT || (left_hit ^ left_hit_old && left_hit_old)) {
-					if (held_sfx_toggle) {
-						play_sound(BTN_RELEASE_HELD);
-					} else play_sound(BTN_RELEASE);
-				}
-			}
-
-			// button RIGHT visual
-			if (k_down & KEY_DRIGHT || k_held & KEY_DRIGHT || right_hit) {
-				// Released -> Held
-				C2D_DrawSprite(&sprites[13].spr);
-
-				if (k_down & KEY_DRIGHT || right_hit ^ right_hit_old) play_sound(BTN_CLICK);
-
-				if (!dice_col) dice_col = 1;
-				if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-			} else {
-				// Held -> Released
-				C2D_DrawSprite(&sprites[12].spr);
-
-				// click release sound
-				if (k_up & KEY_DRIGHT || (right_hit ^ right_hit_old && right_hit_old)) {
-					if (held_sfx_toggle) {
-						play_sound(BTN_RELEASE_HELD);
-					} else play_sound(BTN_RELEASE);
-				}
-			}
-		}
-
-		// -----------------------------------------------------
-		// Letters
-		// -----------------------------------------------------
-		if (info_mode == INFO_CLOSED) {
-			// button B visual
-			if ( k_down & KEY_B || k_held & KEY_B || btn_b_hit) {
-				// Released -> Held
-				C2D_DrawSprite(&sprites[15].spr);
-				// Disco: Off -> On
-				C2D_DrawSprite(&sprites[34].spr);
-					
-
-				if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-				if (k_down & KEY_B || btn_b_hit ^ btn_b_hit_old || time_btn_held >= FRAMES_HELD_MIN) 
-				{
-					if (k_down & KEY_B || btn_b_hit ^ btn_b_hit_old) play_sound(BTN_CLICK);
-
-					// Delete recent dice added
-					// get handle on info
-					Dice* die = &tray[dice_select];
-					if (die->amount == 0 && dice_select > DICE_TRAY_MIN) {
-					// move selection backward
-						if (dice_select > DICE_TRAY_MIN) dice_select--;
-						die = &tray[dice_select];
-					}
-
-					// reset info
-					die->amount = 0;
-					die->mode = DICE_NORMAL;
-					die->type = 0; 	
-					die->type_visual = 0; 	
-					// update notation to be empty
-					snprintf(die->notation, sizeof(die->notation), "%s", "\0");  
-				}
-			} else {
-				// Held -> Released
-				C2D_DrawSprite(&sprites[14].spr);
-
-				// click release sound
-				if (k_up & KEY_B || (btn_b_hit ^ btn_b_hit_old && btn_b_hit_old)) {
-					if (held_sfx_toggle) {
-						play_sound(BTN_RELEASE_HELD);
-					} else play_sound(BTN_RELEASE);
-				}
-			}
-
-			// button A visual
-			if (k_down & KEY_A || k_held & KEY_A || btn_a_hit) {
-				// Released -> Held
-				C2D_DrawSprite(&sprites[17].spr);
-				// Disco: Off -> On
-				C2D_DrawSprite(&sprites[35].spr);
-
-				if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-				if ((k_down & KEY_A || btn_a_hit ^ btn_a_hit_old)) 
-				{
-					play_sound(BTN_CLICK);
-
-					// Add Properties to tray cell selected
-					Dice* die = &tray[dice_select];
-
-					die->amount = amount; 				// amount of die
-					die->mode = dice_mode; 				// normal / advantage / disadv.
-					die->type = types[type_selected]; 	// literal type
-					die->type_visual = type_selected; 	// index of type in type array
-					// save notation for later text usage
-					snprintf(die->notation, sizeof(die->notation), "%dd%d", amount, types[type_selected]); 
-
-					// move selection forward
-					if (dice_select < DICE_TRAY_MAX) {
-						dice_select++;
-					}
-				}
-			} else {
-				// Held -> Released
-				C2D_DrawSprite(&sprites[16].spr);
-
-				// click release sound
-				if (k_up & KEY_A || (btn_a_hit ^ btn_a_hit_old && btn_a_hit_old)) {
-					if (held_sfx_toggle) {
-						play_sound(BTN_RELEASE_HELD);
-					} else play_sound(BTN_RELEASE);
-				}
-			}
-
-			// button X visual
-			if (k_down & KEY_X || k_held & KEY_X || btn_x_hit ) {
-				// Released -> Held
-				C2D_DrawSprite(&sprites[19].spr);
-				// Disco: Off -> On
-				C2D_DrawSprite(&sprites[36].spr);
-
-				if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-				if ((k_down & KEY_X || btn_x_hit ^ btn_x_hit_old)) 
-				{
-					play_sound(BTN_CLICK);
-
-					// Add or remove disdvantage
-					// remove advantage
-					switch (dice_mode) {
-						// Normal, Advantage -> Disadvantage
-						case DICE_NORMAL:
-						case DICE_ADVANTAGE:
-							dice_mode = DICE_DISADVANTAGE;
-							break;
-						// Disadvantage -> Normal
-						case DICE_DISADVANTAGE:
-							dice_mode = DICE_NORMAL;
-							break;
-					}
-				}
-			} else {
-				// Held -> Released
-				C2D_DrawSprite(&sprites[18].spr);
-
-				// click release sound
-				if (k_up & KEY_X || (btn_x_hit ^ btn_x_hit_old && btn_x_hit_old)) {
-					if (held_sfx_toggle) {
-						play_sound(BTN_RELEASE_HELD);
-					} else play_sound(BTN_RELEASE);
-				}
-			}
-
-			// button Y visual
-			if (k_down & KEY_Y || k_held & KEY_Y || btn_y_hit) {
-				// Released -> Held
-				C2D_DrawSprite(&sprites[21].spr);
-				// Disco: Off -> On
-				C2D_DrawSprite(&sprites[37].spr);
-
-				if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-				if ((k_down & KEY_Y || btn_y_hit ^ btn_y_hit_old)) 
-				{
-					play_sound(BTN_CLICK);
-
-					// Add or remove advantage
-					// remove disadvantage
-					switch (dice_mode) {
-						// Normal, Disdvantage -> Advantage
-						case DICE_NORMAL:
-						case DICE_DISADVANTAGE:
-							dice_mode = DICE_ADVANTAGE;
-							break;
-						// Advantage -> Normal
-						case DICE_ADVANTAGE:
-							dice_mode = DICE_NORMAL;
-							break;
-					}
-				}
-			} else {
-				// Held -> Released
-				C2D_DrawSprite(&sprites[20].spr);
-
-				// click release sound
-				if (k_up & KEY_Y || (btn_y_hit ^ btn_y_hit_old && btn_y_hit_old)) {
-					if (held_sfx_toggle) {
-						play_sound(BTN_RELEASE_HELD);
-					} else play_sound(BTN_RELEASE);
-				}
-			}
-
-			// ------------------------------------------------------
-			// highlights:
-			// ------------------------------------------------------
-			// arrow column
-			C2D_DrawSprite(&sprites[32].spr);
-			if (dice_col != dice_col_old)
-			{
-				switch (dice_col)
-				{
-					case 0:
-					C2D_SpriteSetPos(&sprites[32].spr, 2, 92);
-					break;
-					case 1:
-					C2D_SpriteSetPos(&sprites[32].spr, 56, 92);
-					break;
-				}
-			}
-
-			// Letter Buttons General
-			C2D_DrawSprite(&sprites[33].spr);
-
-			// Dice Border
-			C2D_DrawSprite(&sprites[38].spr); 
-		}
-
-		// ------------------------------------------------------
-		// Tray;
-		// ------------------------------------------------------
-		// loop over the dice in the tray array
-		for (int i = 0; i <= DICE_TRAY_MAX; i++) {
-			if (tray[i].amount == 0) continue;
-
-			// draw mini sprites
-			C2D_SpriteSetPos(&sprites[70 + tray[i].type_visual].spr, 61 + 15 * i, 16);
-			C2D_DrawSprite(&sprites[70 + tray[i].type_visual].spr);
-
-			// draw mini highlight
-			switch (tray[i].mode)
-			{
-			// advantage
-			  case DICE_ADVANTAGE:
-			  	C2D_SpriteSetPos(&sprites[48 + tray[i].type_visual].spr, 61 + 15 * i, 16);
-				C2D_DrawSpriteTinted(&sprites[48 + tray[i].type_visual].spr, &advantage_tint);
-				break;
-
-			// disadvantage
-			  case DICE_DISADVANTAGE:
-			  	C2D_SpriteSetPos(&sprites[48 + tray[i].type_visual].spr, 61 + 15 * i, 16);
-				C2D_DrawSpriteTinted(&sprites[48 + tray[i].type_visual].spr, &disadvantage_tint);
-				break;
-			}
-		}
-
-		// Dice Select - Tray
-		select_clock += 0.01f;
-		if (select_clock > 0.60f) select_clock = 0;
-
-		C2D_SpriteSetPos(&sprites[46 + (int)(select_clock / 0.3f)].spr, 61 + 15 * dice_select, 16);
-		C2D_DrawSprite(&sprites[46 + (int)(select_clock / 0.3f)].spr);
-
-		// ------------------------------------------------------
-		// shoulder buttons; 
-		// ------------------------------------------------------
-		// R Button
-		if (is_rolling == CURRENTLY_ROLLING) {
-			C2D_DrawSpriteTinted(&sprites[23].spr, &disabled_btn_tint);
-			if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-		} else if ((k_down & KEY_R || k_held & KEY_R || r_hit) && info_mode == INFO_CLOSED) {
-			// Released -> Held
-			C2D_DrawSprite(&sprites[23].spr);
-
-			if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-			if (k_down & KEY_R || r_hit ^ r_hit_old) {
-				// click sound
-				play_sound(BTN_CLICK);
-
-				// copy the dice and clear tray
-				if (is_rolling == READY_TO_ROLL && dice_select > 0) {
-					// empty queue, update it with current tray, clear tray
-					resetDiceQueue();
-					copyDiceTray();
-					resetDiceTray();
-					// clear results
-					resetDiceResults();
-					roll_die_index = 0;
-
-					// disable R button temporarily
-					is_rolling = CURRENTLY_ROLLING;
-
-					// save length and reset position
-					die_queue_len = dice_select + 1;
-					result_list_len = dice_select;
-					dice_select = 0;
-					display_page = 0;
-				}
-			}
-		} else {
-		 	// Held -> Released
-			C2D_DrawSprite(&sprites[22].spr);
-		
-			// click release sound
-			if ((release_r_sound_flag || k_up & KEY_R || (r_hit ^ r_hit_old && r_hit_old)) && info_mode == INFO_CLOSED) {
-				if (held_sfx_toggle || release_r_sound_flag) {
-					play_sound(BTN_RELEASE_HELD);
-					if (release_r_sound_flag) release_r_sound_flag = 0;
-				} else play_sound(BTN_RELEASE);
-			}
-		}
-
-		// ------------------------------------------------------
-		// info window:
-		// ------------------------------------------------------
-		if (info_mode == INFO_OPEN) 
-		{
-			// display over everything else but the return button
-			// fade
-			C2D_DrawSprite(&sprites[80].spr);
-			// window
-			C2D_DrawSprite(&sprites[81].spr);
-
-			// copyright text
-			renderCopyrightText();
-		}
-		
-		// L Button
-		if (k_down & KEY_L || k_held & KEY_L || l_hit) {
-			// Released -> Held
-			C2D_DrawSprite(&sprites[25 + info_mode*2].spr);
-
-			if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
-			if (k_down & KEY_L || l_hit ^ l_hit_old) {
-				// click sound
-				play_sound(BTN_CLICK);
-				
-				// switch button and window state
-				switch (info_mode) {
-					  case INFO_OPEN:
-					  	info_mode = INFO_CLOSED;
-					  	break;
+						C2D_DrawSprite(&fishing_sprites[34 + variant_display].spr);
+						break;
 						
-					  case INFO_CLOSED:
-					  	info_mode = INFO_OPEN;
-					  	break;
+					// fish
+					case 2:
+						C2D_DrawSprite(&fishing_sprites[37 + variant_display].spr);
+						break;
+						
+					// treasure
+					case 3:
+						C2D_DrawSprite(&fishing_sprites[40 + variant_display].spr);
+						break;
 				}
 			}
-		} else {
-			// Held -> Released
-			C2D_DrawSprite(&sprites[24 + info_mode*2].spr);
+					
+		// --------------------------------------------------------------
+		// bottom screen
+		// --------------------------------------------------------------
+			C2D_TargetClear(bot, C2D_Color32f(0.0f, 0.0f, 0.0f, 1.0f));
+			C2D_SceneBegin(bot);
 
-			if (k_up & KEY_L || (l_hit ^ l_hit_old && l_hit_old)) {
-				if (held_sfx_toggle) {
-					play_sound(BTN_RELEASE_HELD);
-				} else play_sound(BTN_RELEASE);
+			// --------------------------------------------------------------
+			// background
+			// --------------------------------------------------------------
+			// dock; if not cast be ready to
+			C2D_DrawSprite(&fishing_sprites[rest_engaged + rod_not_cast].spr);
+			// exit and back buttons
+			C2D_DrawSprite(&fishing_sprites[45].spr);
+			C2D_DrawSprite(&fishing_sprites[46].spr);
+
+			// increment variable for cast animation; 5 frames
+			if (animate_cast) {
+				if (rod_cast_animation >= 5.0f) {
+					animate_cast = 0;
+				} else {
+					rod_cast_animation += 0.1f;
+				}
 			}
+
+			// random events
+			frame_clock += 0.01f;
+			if (frame_clock >= FRAMES_IN_SEC) {
+				// randomlly wobble, 20%
+				if (randint(5) == 0 && rod_cast_animation >= 5 && !animate_wobble) {
+					animate_wobble = 1;
+				}
+
+				// randomly loot, 5%
+				if (randint(20) == 0 && rod_cast_animation >= 5 && !activate_loot) {
+					rarity = randint(3) + 1;
+					variant = randint(3);
+					rand_attrib1 = randint(99) + 1;
+					rand_attrib2 = randint(10) + 1;
+					gold_worth = randint(51);
+					activate_loot = 1;
+				}
+
+				// reset clock
+				frame_clock = 0.0f;
+			}
+			
+			// loot animations
+			if (activate_loot) {
+				for (int i = 0; i < rarity; i++) {
+					C2D_DrawRectSolid(167 + (i * 6), 72, 0, 4, 14, C2D_Color32f(1.0f, 1.0f, 1.0f, 1.0f));
+					C2D_DrawRectSolid(167 + (i * 6), 88, 0, 4, 4, C2D_Color32f(1.0f, 1.0f, 1.0f, 1.0f));
+				}
+
+				if (loot_wait_clock >= FRAMES_LOOT_WAIT) {
+					if (!animate_reel) {
+						activate_loot = 0;
+						loot_wait_clock = 0.0f;
+					}
+				} else {
+					loot_wait_clock += 0.01f;
+				}
+			}
+
+			// increment animation for wobble; 4 frames
+			if (animate_wobble) {
+				if (rod_wobble_animation > 4.9f) {
+					animate_wobble = 0;
+					rod_wobble_animation = 4.0f;
+				} else {
+					rod_wobble_animation += 0.05f;
+				}
+			} else if (rod_wobble_animation > 0) {
+				rod_wobble_animation = 0;
+			}
+
+			// draw rod if not in rest
+			int rod_mod = rod_cast_animation + rod_wobble_animation;
+			if (!rod_not_cast && !animate_reel) {
+				C2D_DrawSprite(&fishing_sprites[4 + rod_mod].spr);
+			}
+
+			// reel it in, and otherwise draw in rest
+			if (animate_reel) {
+				if (rod_reel_animation > 7.9f) {
+					animate_reel = 0;
+					rod_not_cast = 1;
+
+					if (activate_loot) {
+						loot_got = 1;
+						activate_loot = 0;
+						loot_wait_clock = 0.0f;
+
+						// save values
+						rarity_display = rarity;
+						variant_display = variant;
+						rand_attrib1_disp = rand_attrib1;
+						rand_attrib2_disp = rand_attrib2;
+						gold_worth_disp = gold_worth;
+						gold_total += gold_worth;
+						if (gold_total > 9999) gold_total = 9999;
+					}
+
+					rod_reel_animation = 0.0f;
+				} else {
+					rod_reel_animation += 0.05f;
+
+					C2D_DrawSprite(&fishing_sprites[15 + (int)rod_reel_animation].spr);
+				}
+			}
+
+			// ---------
+			// water
+			// ---------
+			C2D_DrawSprite(&fishing_sprites[3].spr);
+
+			if (frames_passed_no_input >= FRAMES_NO_INPUT_MAX) {
+				frames_passed_no_input = FRAMES_NO_INPUT_MAX;
+				if (rod_not_cast && !animate_reel) rest_engaged = 1;
+			} else {
+				frames_passed_no_input += 0.01f;
+			}
+
+			// water animation
+			water_animation += 0.05; // 11 frames in animation
+			if (water_animation > 11) water_animation = 0.0f;
+
+			C2D_SpriteSetDepth(&fishing_sprites[23 + (int)water_animation].spr, 0.2f);
+			C2D_DrawSprite(&fishing_sprites[23 + (int)water_animation].spr);
+
+			// -------------------------------------------------------------------
+			// input
+			// -------------------------------------------------------------------
+			if (k_down & KEY_A || k_held & KEY_A || btn_a_hit) {
+				// pressed
+				C2D_DrawSprite(&fishing_sprites[44].spr);
+
+				rest_engaged = 0;
+				frames_passed_no_input = 0;
+			} else if (k_up & KEY_A || (btn_a_hit_old && btn_a_hit_old ^ btn_a_hit)) {
+				switch (rod_not_cast)
+				{
+					// cast -> withdrawn
+					case 0:
+						// reset animation
+						rod_cast_animation = 0.0f;
+						rod_wobble_animation = 0.0f;
+
+						// reel it in
+						animate_reel = 1;
+						break;
+
+					// withdrawn -> cast
+					case 1:
+						rod_not_cast = 0;
+						animate_cast = 1;	
+						break;
+				}
+			} else {
+				// released
+				C2D_DrawSprite(&fishing_sprites[43].spr);
+			}
+			
+		// ------------------------------------------------------
+		// Save previous key values --- Spam Prevention
+		// ------------------------------------------------------
+			btn_a_hit_old = btn_a_hit; 	// A button
+
+			C3D_FrameEnd(0);
+		} else if (game_mode == GAME_DICE) {
+		// --------------------------------------------------------------
+		// top screen
+		// --------------------------------------------------------------
+			C2D_TargetClear(top, C2D_Color32f(0.0f, 0.0f, 0.0f, 1.0f));
+			C2D_SceneBegin(top);
+			
+			// --------------------------------------------------------------
+			// background
+			// --------------------------------------------------------------
+			C2D_DrawSprite(&sprites[0].spr);
+
+			// --------------------------------------------------------------
+			// Dice Roll Text
+			// --------------------------------------------------------------
+			renderRollText(roll_die_index, display_page);
+
+			// --------------------------------------------------------------
+			// C pad
+			// --------------------------------------------------------------
+			if (is_rolling == CURRENTLY_ROLLING) {
+				C2D_DrawSpriteTinted(&sprites[28].spr, &disabled_btn_tint);
+			} else if (k_down & KEY_CPAD_LEFT || k_held & KEY_CPAD_LEFT) {
+				// Released -> Held Left
+				C2D_DrawSprite(&sprites[30].spr);
+
+				// move to 2nd page if there are results
+				if (display_page == 1 && result_list_len > 0) display_page = 0; 
+
+				if (k_down & KEY_CPAD_LEFT) play_sound(BTN_CLICK);
+
+			} else if (k_down & KEY_CPAD_RIGHT || k_held & KEY_CPAD_RIGHT) {
+				// Released -> Held Right
+				C2D_DrawSprite(&sprites[29].spr);
+
+				// move to 1st page
+				if (display_page == 0 && result_list_len > PAGE_DISPLAY_MAX) display_page = 1; 
+					
+				if (k_down & KEY_CPAD_RIGHT) play_sound(BTN_CLICK);
+
+			} else {
+				// Held -> Released
+				C2D_DrawSprite(&sprites[28].spr);
+
+				if (k_up & KEY_CPAD_LEFT || k_up & KEY_CPAD_RIGHT || release_r_sound_flag) {
+					play_sound(BTN_RELEASE);
+				}
+			}
+
+			// --------------------------------------------------------------
+			// Dice Rolling
+			// --------------------------------------------------------------
+			if (is_rolling == CURRENTLY_ROLLING && is_rolling_old) {
+
+				// --------------------------------------------------------------
+				// Dice Rolling Mechanism
+				// --------------------------------------------------------------
+				// check if the current position in queue is the end, if so, end this rolling thing
+				if (current_die_index >= die_queue_len) {
+					// finished rolling all the dice
+					is_rolling = READY_TO_ROLL;
+		
+					// reset variables
+					roll_frames = 0.0f;
+					current_die_index = 0;
+					release_r_sound_flag = 1;
+
+					// if not at the end, check if the current die was rolled, if so, roll it
+					// rand rolled makes it cycle through some numbers before committing
+				} else if (!was_rolled) {
+					// roll dice
+					rollDiceQueue(current_die_index);
+
+					// mark rolled
+					was_rolled = 1;
+				}
+
+				// once 100 frames pass, and it rolled, move on to next dice in queue
+				if (roll_frames >= FRAMES_HELD_MAX / 2 && is_rolling == CURRENTLY_ROLLING && was_rolled) {
+					current_die_index++;
+					if (current_die_index >= PAGE_DISPLAY_MAX && result_list_len > PAGE_DISPLAY_MAX) {
+						display_page = 1;
+					}
+
+					if (roll_die_index < result_list_len) {
+						roll_die_index++;
+					}
+					
+					was_rolled = 0;
+					roll_frames = 0.0f;
+				} else if (roll_frames < FRAMES_HELD_MAX) roll_frames += 0.01;
+			}
+
+		// --------------------------------------------------------------
+		// bottom screen
+		// --------------------------------------------------------------
+			C2D_TargetClear(bot, C2D_Color32f(0.0f, 0.0f, 0.0f, 1.0f));
+			C2D_SceneBegin(bot);
+
+			// --------------------------------------------------------------
+			// background
+			// --------------------------------------------------------------
+			C2D_DrawSprite(&sprites[1].spr);
+
+			// --------------------------------------------------------------
+			// Dice
+			// --------------------------------------------------------------
+			// Middle Bit
+			// Float the dice
+			sin_move_rads += 0.01f * WAVE_SPEED_MULTIPLIER;
+			if (sin_move_rads > M_PI * 2) sin_move_rads = 0;
+
+			float dice_sin_pos_add = sinf(sin_move_rads) * WAVE_MOVE_MULTIPLIER;
+
+			// big dice - info toggle
+			if (info_mode == INFO_CLOSED) {
+				C2D_SpriteSetPos(&sprites[39+type_selected].spr, BOTTOM_SCREEN_WIDTH / 2, BOTTOM_SCREEN_HEIGHT / 2 + 8 + dice_sin_pos_add);
+				C2D_SpriteSetPos(&sprites[60+type_selected].spr, BOTTOM_SCREEN_WIDTH / 2, BOTTOM_SCREEN_HEIGHT / 2 + 8 + dice_sin_pos_add);
+
+				// Type Visualization - dice actual
+				C2D_DrawSprite(&sprites[60+type_selected].spr);
+
+				// Mode Visualization - dice aura
+				switch (dice_mode) {
+					// Normal
+					case 0:
+						C2D_DrawSprite(&sprites[39+type_selected].spr);
+						break;
+						
+					// Advantage
+					case 1:
+						C2D_DrawSpriteTinted(&sprites[39+type_selected].spr, &advantage_tint);
+						break;
+						
+					// Disadvantage
+					case -1:
+						C2D_DrawSpriteTinted(&sprites[39+type_selected].spr, &disadvantage_tint);
+						break;
+				}
+			}
+
+			// --------------------------------------------------------------
+			// UI Text
+			// --------------------------------------------------------------
+			// Dice Text
+			float amount_digits = floor(log10(abs(amount)));
+			float type_digits = floor(log10(abs(types[type_selected])));
+			renderDiceText(amount_digits, type_digits);
+
+			// ------------------------------------------------------
+			// buttons;
+			// ------------------------------------------------------
+			// different sfx toggle
+			if (time_btn_held >= FRAMES_HELD_MIN) {
+				held_sfx_toggle = 1;
+			} else {
+				held_sfx_toggle = 0;
+			}
+
+			// reset time held if these were released or not pressed
+			if (!(k_held) && \
+				(!a_up_hit && !a_down_hit && !t_up_hit && !t_down_hit  && \
+				!r_hit && !l_hit && \
+				!btn_b_hit && !btn_a_hit && !btn_x_hit && !btn_y_hit)) {
+				time_btn_held = 0.0f;
+			}
+
+			// info toggle
+			if (info_mode == INFO_CLOSED) {
+				// button UP visual
+				if ( k_down & KEY_DUP || k_held & KEY_DUP) {
+					if (k_down & KEY_DUP) play_sound(BTN_CLICK);
+
+					switch (dice_col)
+					{
+						// AMOUNT column selected
+						case 0:
+						// Amount: Released -> Held
+							C2D_DrawSprite(&sprites[3].spr);
+							C2D_DrawSprite(&sprites[6].spr);
+
+							if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+							if ((k_down & KEY_DUP || time_btn_held >= FRAMES_HELD_MIN) && amount < AMOUNT_MAX) {
+								amount++;
+							}
+						break;
+						// TYPE column selected
+						case 1:
+							C2D_DrawSprite(&sprites[2].spr);
+							C2D_DrawSprite(&sprites[7].spr);
+
+							if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+							if ((k_down & KEY_DUP || time_btn_held >= FRAMES_HELD_MIN) && type_selected < TYPE_MAX) {
+								type_selected++;
+							}
+						break;
+					}
+				} else if ( a_up_hit || t_up_hit) {
+					if (a_up_hit) {
+						C2D_DrawSprite(&sprites[3].spr);
+						if (dice_col) dice_col = 0;
+						
+						if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+						if ((a_up_hit ^ a_up_hit_old || time_btn_held >= FRAMES_HELD_MIN) && amount < AMOUNT_MAX) {
+								amount++;
+
+								if (a_up_hit ^ a_up_hit_old) play_sound(BTN_CLICK);
+							}
+					} else {
+						C2D_DrawSprite(&sprites[2].spr);
+					}
+
+					if (t_up_hit) {
+						C2D_DrawSprite(&sprites[7].spr);
+						if (!dice_col) dice_col = 1;
+
+						if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+						if ((t_up_hit ^ t_up_hit_old || time_btn_held >= FRAMES_HELD_MIN) && type_selected < TYPE_MAX) {
+								type_selected++;
+
+								if (t_up_hit ^ t_up_hit_old) play_sound(BTN_CLICK);
+							}
+					} else {
+						C2D_DrawSprite(&sprites[6].spr);
+					}
+				} else {
+					// Held -> Released
+					C2D_DrawSprite(&sprites[2].spr);
+					C2D_DrawSprite(&sprites[6].spr);
+
+					if (k_up & KEY_DUP || (a_up_hit ^ a_up_hit_old && a_up_hit_old) || (t_up_hit ^ t_up_hit_old && t_up_hit_old)) {
+						if (held_sfx_toggle) {
+							play_sound(BTN_RELEASE_HELD);
+						} else play_sound(BTN_RELEASE);
+					}
+				}
+
+				// button DOWN visual
+				if (k_down & KEY_DDOWN || k_held & KEY_DDOWN) {
+					if (k_down & KEY_DDOWN) play_sound(BTN_CLICK);
+
+					switch (dice_col)
+					{
+						// AMOUNT column selected
+						case 0:
+							// Amount: Released -> Held
+							C2D_DrawSprite(&sprites[5].spr);
+							C2D_DrawSprite(&sprites[8].spr);
+
+							if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+							if ((k_down & KEY_DDOWN || time_btn_held >= FRAMES_HELD_MIN) && amount > AMOUNT_MIN) {
+								amount--;
+							}
+						break;
+						// TYPE column selected
+						case 1:
+							// Type: Released -> Held
+							C2D_DrawSprite(&sprites[4].spr);
+							C2D_DrawSprite(&sprites[9].spr);
+
+							if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+							if ((k_down & KEY_DDOWN || time_btn_held >= FRAMES_HELD_MIN) && type_selected > TYPE_MIN) {
+								type_selected--;
+							}
+						break;
+					}
+				} else if ( a_down_hit || t_down_hit) {
+					if (a_down_hit) {
+						C2D_DrawSprite(&sprites[5].spr);
+						if (dice_col) dice_col = 0;
+						
+						if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+						if ((a_down_hit ^ a_down_hit_old || time_btn_held >= FRAMES_HELD_MIN) && amount > AMOUNT_MIN) {
+								amount--;
+
+								if (a_down_hit ^ a_down_hit_old) play_sound(BTN_CLICK);
+							}
+					} else {
+						C2D_DrawSprite(&sprites[4].spr);
+					}
+
+					if (t_down_hit) {
+						C2D_DrawSprite(&sprites[9].spr);
+						if (!dice_col) dice_col = 1;
+
+						if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+						if ((t_down_hit ^ t_down_hit_old || time_btn_held >= FRAMES_HELD_MIN) && type_selected > TYPE_MIN) {
+								type_selected--;
+
+								if (t_down_hit ^ t_down_hit_old) play_sound(BTN_CLICK);
+							}
+					} else {
+						C2D_DrawSprite(&sprites[8].spr);
+					}
+				} else {
+					// Held -> Released
+					C2D_DrawSprite(&sprites[4].spr);
+					C2D_DrawSprite(&sprites[8].spr);
+
+					if (k_up & KEY_DDOWN || (a_down_hit ^ a_down_hit_old && a_down_hit_old) || (t_down_hit ^ t_down_hit_old && t_down_hit_old)) {
+						if (held_sfx_toggle) {
+							play_sound(BTN_RELEASE_HELD);
+						} else play_sound(BTN_RELEASE);
+					}
+				}
+
+				// Column Select
+				// button LEFT visual
+				if (k_down & KEY_DLEFT || k_held & KEY_DLEFT || left_hit) {
+					// Released -> Held
+					C2D_DrawSprite(&sprites[11].spr);
+
+					if (k_down & KEY_DLEFT || left_hit ^ left_hit_old) play_sound(BTN_CLICK);
+
+					if (dice_col) dice_col = 0;
+					if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+				} else {
+					// Held -> Released
+					C2D_DrawSprite(&sprites[10].spr);
+
+					// click release sound
+					if (k_up & KEY_DLEFT || (left_hit ^ left_hit_old && left_hit_old)) {
+						if (held_sfx_toggle) {
+							play_sound(BTN_RELEASE_HELD);
+						} else play_sound(BTN_RELEASE);
+					}
+				}
+
+				// button RIGHT visual
+				if (k_down & KEY_DRIGHT || k_held & KEY_DRIGHT || right_hit) {
+					// Released -> Held
+					C2D_DrawSprite(&sprites[13].spr);
+
+					if (k_down & KEY_DRIGHT || right_hit ^ right_hit_old) play_sound(BTN_CLICK);
+
+					if (!dice_col) dice_col = 1;
+					if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+				} else {
+					// Held -> Released
+					C2D_DrawSprite(&sprites[12].spr);
+
+					// click release sound
+					if (k_up & KEY_DRIGHT || (right_hit ^ right_hit_old && right_hit_old)) {
+						if (held_sfx_toggle) {
+							play_sound(BTN_RELEASE_HELD);
+						} else play_sound(BTN_RELEASE);
+					}
+				}
+			}
+
+			// -----------------------------------------------------
+			// Letters
+			// -----------------------------------------------------
+			if (info_mode == INFO_CLOSED) {
+				// button B visual
+				if ( k_down & KEY_B || k_held & KEY_B || btn_b_hit) {
+					// Released -> Held
+					C2D_DrawSprite(&sprites[15].spr);
+					// Disco: Off -> On
+					C2D_DrawSprite(&sprites[34].spr);
+						
+
+					if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+					if (k_down & KEY_B || btn_b_hit ^ btn_b_hit_old || time_btn_held >= FRAMES_HELD_MIN) 
+					{
+						if (k_down & KEY_B || btn_b_hit ^ btn_b_hit_old) play_sound(BTN_CLICK);
+
+						// Delete recent dice added
+						// get handle on info
+						Dice* die = &tray[dice_select];
+						if (die->amount == 0 && dice_select > DICE_TRAY_MIN) {
+						// move selection backward
+							if (dice_select > DICE_TRAY_MIN) dice_select--;
+							die = &tray[dice_select];
+						}
+
+						// reset info
+						die->amount = 0;
+						die->mode = DICE_NORMAL;
+						die->type = 0; 	
+						die->type_visual = 0; 	
+						// update notation to be empty
+						snprintf(die->notation, sizeof(die->notation), "%s", "\0");  
+					}
+				} else {
+					// Held -> Released
+					C2D_DrawSprite(&sprites[14].spr);
+
+					// click release sound
+					if (k_up & KEY_B || (btn_b_hit ^ btn_b_hit_old && btn_b_hit_old)) {
+						if (held_sfx_toggle) {
+							play_sound(BTN_RELEASE_HELD);
+						} else play_sound(BTN_RELEASE);
+					}
+				}
+
+				// button A visual
+				if (k_down & KEY_A || k_held & KEY_A || btn_a_hit) {
+					// Released -> Held
+					C2D_DrawSprite(&sprites[17].spr);
+					// Disco: Off -> On
+					C2D_DrawSprite(&sprites[35].spr);
+
+					if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+					if ((k_down & KEY_A || btn_a_hit ^ btn_a_hit_old)) 
+					{
+						play_sound(BTN_CLICK);
+
+						// Add Properties to tray cell selected
+						Dice* die = &tray[dice_select];
+
+						die->amount = amount; 				// amount of die
+						die->mode = dice_mode; 				// normal / advantage / disadv.
+						die->type = types[type_selected]; 	// literal type
+						die->type_visual = type_selected; 	// index of type in type array
+						// save notation for later text usage
+						snprintf(die->notation, sizeof(die->notation), "%dd%d", amount, types[type_selected]); 
+
+						// move selection forward
+						if (dice_select < DICE_TRAY_MAX) {
+							dice_select++;
+						}
+					}
+				} else {
+					// Held -> Released
+					C2D_DrawSprite(&sprites[16].spr);
+
+					// click release sound
+					if (k_up & KEY_A || (btn_a_hit ^ btn_a_hit_old && btn_a_hit_old)) {
+						if (held_sfx_toggle) {
+							play_sound(BTN_RELEASE_HELD);
+						} else play_sound(BTN_RELEASE);
+					}
+				}
+
+				// button X visual
+				if (k_down & KEY_X || k_held & KEY_X || btn_x_hit ) {
+					// Released -> Held
+					C2D_DrawSprite(&sprites[19].spr);
+					// Disco: Off -> On
+					C2D_DrawSprite(&sprites[36].spr);
+
+					if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+					if ((k_down & KEY_X || btn_x_hit ^ btn_x_hit_old)) 
+					{
+						play_sound(BTN_CLICK);
+
+						// Add or remove disdvantage
+						// remove advantage
+						switch (dice_mode) {
+							// Normal, Advantage -> Disadvantage
+							case DICE_NORMAL:
+							case DICE_ADVANTAGE:
+								dice_mode = DICE_DISADVANTAGE;
+								break;
+							// Disadvantage -> Normal
+							case DICE_DISADVANTAGE:
+								dice_mode = DICE_NORMAL;
+								break;
+						}
+					}
+				} else {
+					// Held -> Released
+					C2D_DrawSprite(&sprites[18].spr);
+
+					// click release sound
+					if (k_up & KEY_X || (btn_x_hit ^ btn_x_hit_old && btn_x_hit_old)) {
+						if (held_sfx_toggle) {
+							play_sound(BTN_RELEASE_HELD);
+						} else play_sound(BTN_RELEASE);
+					}
+				}
+
+				// button Y visual
+				if (k_down & KEY_Y || k_held & KEY_Y || btn_y_hit) {
+					// Released -> Held
+					C2D_DrawSprite(&sprites[21].spr);
+					// Disco: Off -> On
+					C2D_DrawSprite(&sprites[37].spr);
+
+					if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+					if ((k_down & KEY_Y || btn_y_hit ^ btn_y_hit_old)) 
+					{
+						play_sound(BTN_CLICK);
+
+						// Add or remove advantage
+						// remove disadvantage
+						switch (dice_mode) {
+							// Normal, Disdvantage -> Advantage
+							case DICE_NORMAL:
+							case DICE_DISADVANTAGE:
+								dice_mode = DICE_ADVANTAGE;
+								break;
+							// Advantage -> Normal
+							case DICE_ADVANTAGE:
+								dice_mode = DICE_NORMAL;
+								break;
+						}
+					}
+				} else {
+					// Held -> Released
+					C2D_DrawSprite(&sprites[20].spr);
+
+					// click release sound
+					if (k_up & KEY_Y || (btn_y_hit ^ btn_y_hit_old && btn_y_hit_old)) {
+						if (held_sfx_toggle) {
+							play_sound(BTN_RELEASE_HELD);
+						} else play_sound(BTN_RELEASE);
+					}
+				}
+
+				// ------------------------------------------------------
+				// highlights:
+				// ------------------------------------------------------
+				// arrow column
+				C2D_DrawSprite(&sprites[32].spr);
+				if (dice_col != dice_col_old)
+				{
+					switch (dice_col)
+					{
+						case 0:
+						C2D_SpriteSetPos(&sprites[32].spr, 2, 92);
+						break;
+						case 1:
+						C2D_SpriteSetPos(&sprites[32].spr, 56, 92);
+						break;
+					}
+				}
+
+				// Letter Buttons General
+				C2D_DrawSprite(&sprites[33].spr);
+
+				// Dice Border
+				C2D_DrawSprite(&sprites[38].spr); 
+			}
+
+			// ------------------------------------------------------
+			// Tray;
+			// ------------------------------------------------------
+			// loop over the dice in the tray array
+			for (int i = 0; i <= DICE_TRAY_MAX; i++) {
+				if (tray[i].amount == 0) continue;
+
+				// draw mini sprites
+				C2D_SpriteSetPos(&sprites[70 + tray[i].type_visual].spr, 61 + 15 * i, 16);
+				C2D_DrawSprite(&sprites[70 + tray[i].type_visual].spr);
+
+				// draw mini highlight
+				switch (tray[i].mode)
+				{
+				// advantage
+				case DICE_ADVANTAGE:
+					C2D_SpriteSetPos(&sprites[48 + tray[i].type_visual].spr, 61 + 15 * i, 16);
+					C2D_DrawSpriteTinted(&sprites[48 + tray[i].type_visual].spr, &advantage_tint);
+					break;
+
+				// disadvantage
+				case DICE_DISADVANTAGE:
+					C2D_SpriteSetPos(&sprites[48 + tray[i].type_visual].spr, 61 + 15 * i, 16);
+					C2D_DrawSpriteTinted(&sprites[48 + tray[i].type_visual].spr, &disadvantage_tint);
+					break;
+				}
+			}
+
+			// Dice Select - Tray
+			select_clock += 0.01f;
+			if (select_clock > 0.60f) select_clock = 0;
+
+			C2D_SpriteSetPos(&sprites[46 + (int)(select_clock / 0.3f)].spr, 61 + 15 * dice_select, 16);
+			C2D_DrawSprite(&sprites[46 + (int)(select_clock / 0.3f)].spr);
+
+			// ------------------------------------------------------
+			// shoulder buttons; 
+			// ------------------------------------------------------
+			// R Button
+			if (is_rolling == CURRENTLY_ROLLING) {
+				C2D_DrawSpriteTinted(&sprites[23].spr, &disabled_btn_tint);
+				if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+			} else if ((k_down & KEY_R || k_held & KEY_R || r_hit) && info_mode == INFO_CLOSED) {
+				// Released -> Held
+				C2D_DrawSprite(&sprites[23].spr);
+
+				if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+				if (k_down & KEY_R || r_hit ^ r_hit_old) {
+					// click sound
+					play_sound(BTN_CLICK);
+
+					// copy the dice and clear tray
+					if (is_rolling == READY_TO_ROLL && dice_select > 0) {
+						// empty queue, update it with current tray, clear tray
+						resetDiceQueue();
+						copyDiceTray();
+						resetDiceTray();
+						// clear results
+						resetDiceResults();
+						roll_die_index = 0;
+
+						// disable R button temporarily
+						is_rolling = CURRENTLY_ROLLING;
+
+						// save length and reset position
+						die_queue_len = dice_select + 1;
+						result_list_len = dice_select;
+						dice_select = 0;
+						display_page = 0;
+					}
+				}
+			} else {
+				// Held -> Released
+				C2D_DrawSprite(&sprites[22].spr);
+			
+				// click release sound
+				if ((release_r_sound_flag || k_up & KEY_R || (r_hit ^ r_hit_old && r_hit_old)) && info_mode == INFO_CLOSED) {
+					if (held_sfx_toggle || release_r_sound_flag) {
+						play_sound(BTN_RELEASE_HELD);
+						if (release_r_sound_flag) release_r_sound_flag = 0;
+					} else play_sound(BTN_RELEASE);
+				}
+			}
+
+			// ------------------------------------------------------
+			// info window:
+			// ------------------------------------------------------
+			if (info_mode == INFO_OPEN) 
+			{
+				// display over everything else but the return button
+				// fade
+				C2D_DrawSprite(&sprites[80].spr);
+				// window
+				C2D_DrawSprite(&sprites[81].spr);
+
+				// copyright text
+				renderCopyrightText();
+			}
+			
+			// L Button
+			if (k_down & KEY_L || k_held & KEY_L || l_hit) {
+				// Released -> Held
+				C2D_DrawSprite(&sprites[25 + info_mode*2].spr);
+
+				if (time_btn_held < FRAMES_HELD_MAX) time_btn_held += 0.01f;
+				if (k_down & KEY_L || l_hit ^ l_hit_old) {
+					// click sound
+					play_sound(BTN_CLICK);
+					
+					// switch button and window state
+					switch (info_mode) {
+						case INFO_OPEN:
+							info_mode = INFO_CLOSED;
+							break;
+							
+						case INFO_CLOSED:
+							info_mode = INFO_OPEN;
+							break;
+					}
+				}
+			} else {
+				// Held -> Released
+				C2D_DrawSprite(&sprites[24 + info_mode*2].spr);
+
+				if (k_up & KEY_L || (l_hit ^ l_hit_old && l_hit_old)) {
+					if (held_sfx_toggle) {
+						play_sound(BTN_RELEASE_HELD);
+					} else play_sound(BTN_RELEASE);
+				}
+			}
+
+		// ------------------------------------------------------
+		// Save previous key values --- Spam Prevention
+		// ------------------------------------------------------
+			dice_col_old = dice_col; 	// to make sure that the column highlight 
+										// doesnt need to move as much
+			dice_mode_old = dice_mode; // Dis/Advantage
+
+			a_up_hit_old = a_up_hit; 	// Amount UP
+			t_up_hit_old = t_up_hit; 	// Type UP
+			a_down_hit_old = a_down_hit; // Amount DOWN
+			t_down_hit_old = t_down_hit; // Type DOWN
+			right_hit_old = right_hit;	//Column right
+			left_hit_old = left_hit;	//Column left
+
+			btn_b_hit_old = btn_b_hit; 	// B button
+			btn_a_hit_old = btn_a_hit; 	// A button
+			btn_x_hit_old = btn_x_hit; 	// X button
+			btn_y_hit_old = btn_y_hit; 	// Y button
+
+			r_hit_old = r_hit; // R shoulder button
+			l_hit_old = l_hit; // L shoulder button
+
+			is_rolling_old = is_rolling; // current rolling sitch
+
+			C3D_FrameEnd(0);
 		}
-
-	// ------------------------------------------------------
-	// Save previous key values --- Spam Prevention
-	// ------------------------------------------------------
-		dice_col_old = dice_col; 	// to make sure that the column highlight 
-									// doesnt need to move as much
-		dice_mode_old = dice_mode; // Dis/Advantage
-
-		a_up_hit_old = a_up_hit; 	// Amount UP
-		t_up_hit_old = t_up_hit; 	// Type UP
-		a_down_hit_old = a_down_hit; // Amount DOWN
-		t_down_hit_old = t_down_hit; // Type DOWN
-		right_hit_old = right_hit;	//Column right
-		left_hit_old = left_hit;	//Column left
-
-		btn_b_hit_old = btn_b_hit; 	// B button
-		btn_a_hit_old = btn_a_hit; 	// A button
-		btn_x_hit_old = btn_x_hit; 	// X button
-		btn_y_hit_old = btn_y_hit; 	// Y button
-
-		r_hit_old = r_hit; // R shoulder button
-		l_hit_old = l_hit; // L shoulder button
-
-		is_rolling_old = is_rolling; // current rolling sitch
-
-		C3D_FrameEnd(0);
 	}
 
 	// Deinitialize Scene Text
@@ -2121,6 +2770,8 @@ int main(int argc, char* argv[]) {
 	C2D_SpriteSheetFree(btn_sprite_sheet);  
 	C2D_SpriteSheetFree(hl_sprite_sheet);
 	C2D_SpriteSheetFree(dice_sprite_sheet);
+	C2D_SpriteSheetFree(fishing_sprite_sheet);
+	
 
 	// Deinit libs
 	ndspExit();
